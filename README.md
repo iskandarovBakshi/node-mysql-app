@@ -29,6 +29,7 @@ FSYMS="BTC,XRP,ETH,BCH,EOS,LTC,XMR,DASH"
 TSYMS="USD,EUR,GBP,JPY,RUR"
 ```
 - start app `docker-compose up`
+- you can check socket on `localhost:$NODE_LOCAL_PORT`
 
 -----
 ### Used packages

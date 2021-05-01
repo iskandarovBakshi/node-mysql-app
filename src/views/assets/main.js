@@ -9,4 +9,7 @@ socket.on("message", data => {
   });
 socket.on("data", (data) => {
     console.log(data);
+
+    document.body.innerHTML = (`<pre>${JSON.stringify(data, undefined, 2)}</pre>`)
+
 });
