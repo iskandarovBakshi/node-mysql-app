@@ -20,17 +20,21 @@ const { Op } = require("sequelize");
 
     await sequelize.sequelize.sync(); // sync models
 
-    cron.schedule(config.cronSchedule, async () => { // start cron
-      const response = await fetch(config.api.pricemultifull.url).catch( // fetch from api
+    cron.schedule(config.cronSchedule, async () => {
+      // start cron
+      const response = await fetch(config.api.pricemultifull.url).catch(
+        // fetch from api
         logger.error
       );
 
       const res = await response.json().catch(logger.error);
-      if (res) { // parse object data into array
+      if (res) {
+        // parse object data into array
         const raw = res["RAW"];
         const display = res["DISPLAY"];
         let parcedResponse = [];
-        for (let coin_name in raw) { // O of n2
+        for (let coin_name in raw) {
+          // O of n2
           const details = {
             coin_name: "",
             currencies: [],
@@ -54,8 +58,10 @@ const { Op } = require("sequelize");
           parcedResponse.push(details);
         }
 
-        try { // store data into db
-          parcedResponse.forEach(async (coin) => { // O of n2
+        try {
+          // store data into db
+          parcedResponse.forEach(async (coin) => {
+            // O of n2
             const found = await sequelize.list_coins.findOne({
               where: { coin_name: coin.coin_name },
             });
@@ -126,7 +132,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use( // logger middleware for api
+app.use(
+  // logger middleware for api
   morgan("combined", {
     stream: fs.createWriteStream(config.webLogs, { flags: "a" }),
   })
@@ -139,58 +146,79 @@ app.use(express.static(config.static));
 app.get("/", function (req, res) {
   res.sendFile(`${config.static}/home.html`);
 });
-
-io.on("connection", (socket) => { // socket handshake
+let interval;
+const allClients = [];
+io.on("connection", (socket) => {
+  // socket handshake
   logger.info("User connected");
   socket.send("Handshake");
+  allClients.push(socket);
+  if (!interval) {
+    interval = startSocket();
+  }
+
+
+  socket.on("disconnect", function () {
+    console.info("disconnect!");
+
+    var i = allClients.indexOf(socket);
+    allClients.splice(i, 1);
+
+    if (allClients.length === 0) {
+      clearInterval(interval);
+      interval = undefined;
+    }
+  });
 });
 
-setInterval(async () => {
-  let result = {
-    RAW: {},
-    DISPLAY: {},
-  };
+function startSocket() {
+  const id = setInterval(async () => {
+    let result = {
+      RAW: {},
+      DISPLAY: {},
+    };
 
-  const list_coins = await sequelize.list_coins.findAll({
-    where: {
-      [Op.or]: config.fsymsParsed.map((f) => ({ coin_name: f })),
-    },
-  });
-  const currencies = await sequelize.currencies.findAll({
-    where: {
-      [Op.or]: config.tsymsParsed.map((f) => ({ currency_name: f })),
-    },
-  });
-  for (let coin of list_coins) {
-    result.RAW[coin.coin_name] = {};
-    result.DISPLAY[coin.coin_name] = {};
+    const list_coins = await sequelize.list_coins.findAll({
+      where: {
+        [Op.or]: config.fsymsParsed.map((f) => ({ coin_name: f })),
+      },
+    });
+    const currencies = await sequelize.currencies.findAll({
+      where: {
+        [Op.or]: config.tsymsParsed.map((f) => ({ currency_name: f })),
+      },
+    });
+    for (let coin of list_coins) {
+      result.RAW[coin.coin_name] = {};
+      result.DISPLAY[coin.coin_name] = {};
 
-    for (let curr of currencies) {
-      const currDetail = await sequelize.raw_detail.findOne({
-        limit: config.fsymsParsed.length * config.tsymsParsed.length,
-        order: [["createdAt", "DESC"]],
-        where: {
-          coin_id: coin.id,
-          currency_id: curr.id,
-        },
-        raw: true,
-      });
-      const currDis = await sequelize.display_detail.findOne({
-        limit: config.fsymsParsed.length * config.tsymsParsed.length,
-        order: [["createdAt", "DESC"]],
-        where: {
-          coin_id: coin.id,
-          currency_id: curr.id,
-        },
-        raw: true,
-      });
-      result.RAW[coin.coin_name][curr.currency_name] = currDetail;
-      result.DISPLAY[coin.coin_name][curr.currency_name] = currDis;
+      for (let curr of currencies) {
+        const currDetail = await sequelize.raw_detail.findOne({
+          limit: config.fsymsParsed.length * config.tsymsParsed.length,
+          order: [["createdAt", "DESC"]],
+          where: {
+            coin_id: coin.id,
+            currency_id: curr.id,
+          },
+          raw: true,
+        });
+        const currDis = await sequelize.display_detail.findOne({
+          limit: config.fsymsParsed.length * config.tsymsParsed.length,
+          order: [["createdAt", "DESC"]],
+          where: {
+            coin_id: coin.id,
+            currency_id: curr.id,
+          },
+          raw: true,
+        });
+        result.RAW[coin.coin_name][curr.currency_name] = currDetail;
+        result.DISPLAY[coin.coin_name][curr.currency_name] = currDis;
+      }
     }
-  }
-  io.emit("data", result);
-}, config.socketMs);
-
+    io.emit("data", result);
+  }, config.socketMs);
+  return id;
+}
 // listen
 server.listen(config.port, config.hostname, () => {
   logger.info(
